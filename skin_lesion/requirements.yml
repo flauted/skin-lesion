@@ -1,0 +1,11 @@
+name: isic2018
+channels:
+  - defaults
+  - pytorch
+  - conda-forge
+dependencies:
+  - defaults::python
+  - defaults::pip
+  - pytorch::pytorch=0.4.1
+  - defaults::matplotlib
+  - conda-forge::opencv
