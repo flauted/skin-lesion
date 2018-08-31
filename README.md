@@ -58,7 +58,3 @@ A: It's Creative Commons license. It is not licensed with (nor included with) th
 Q: SegNet references?
 
 A: [clean implementation](https://github.com/zijundeng/pytorch-semantic-segmentation/blob/master/models/seg_net.py), [dirty (but explicit) implementation](https://github.com/delta-onera/delta_tb/blob/master/semantic_segmentation/model/segnet.py), and [the paper](https://arxiv.org/pdf/1511.00561.pdf)
-
-Q: Where are the pretrained model weights (e.g. VGG16)? How do I get them? Etc.
-
-A: 

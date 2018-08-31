@@ -1,11 +1,12 @@
 # The torchvision initializers suck because
 # they don't allow user to specify a path.
-# This is a hot fix.
+# This is a hot fix
 
 import torchvision.models.vgg as vgg
 import torch.utils.model_zoo as model_zoo
 
 
+# modified from https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
 def vgg19_bn(pretrained=False, model_dir=None, **kwargs):
     """VGG 19-layer model (configuration 'E') with batch normalization
     Args:

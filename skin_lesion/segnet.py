@@ -1,3 +1,4 @@
+# modified from https://github.com/zijundeng/pytorch-semantic-segmentation/blob/master/models/seg_net.py
 import torch
 from torch import nn
 
