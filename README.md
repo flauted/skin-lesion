@@ -30,5 +30,5 @@ for i in $( ls *.zip ); do rm $i; done
 
 Q: What's the ISIC data's license?
 
-A: It's Creative COmmons license. It is not licensed with (nor included with) this software.
+A: It's Creative Commons license. It is not licensed with (nor included with) this software.
 
