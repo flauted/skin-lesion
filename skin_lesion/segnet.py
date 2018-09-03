@@ -2,7 +2,7 @@
 import torch
 from torch import nn
 
-import models
+from models import vgg19_bn
 
 
 def initialize_weights(*models):
@@ -20,7 +20,8 @@ def initialize_weights(*models):
 class _DecoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels, num_conv_layers):
         super(_DecoderBlock, self).__init__()
-        middle_channels = in_channels / 2
+        assert in_channels % 2 == 0, "in_channels should be even."
+        middle_channels = in_channels // 2
         layers = [
             nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
             nn.Conv2d(in_channels, middle_channels, kernel_size=3, padding=1),
@@ -46,7 +47,7 @@ class _DecoderBlock(nn.Module):
 class SegNet(nn.Module):
     def __init__(self, num_classes, pretrained=True, model_dir=None):
         super(SegNet, self).__init__()
-        vgg = models.vgg19_bn(pretrained=pretrained, model_dir=model_dir)
+        vgg = vgg19_bn(pretrained=pretrained, model_dir=model_dir)
         features = list(vgg.features.children())
         self.enc1 = nn.Sequential(*features[0:7])
         self.enc2 = nn.Sequential(*features[7:14])

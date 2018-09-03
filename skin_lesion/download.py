@@ -3,17 +3,15 @@ import argparse
 import torchvision
 
 import models
+from args import add_model_dir
+from default_paths import DEFAULT_MODEL_DIR
 
-DEFAULT_MODEL_DIR = None
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--model-dir", default=DEFAULT_MODEL_DIR,
-                        help="Location of models parent directory "
-                             "(defaults to $TORCH_MODEL_ZOO, which defaults to $TORCH_HOME/models. "
-                             "$TORCH_HOME defaults to ~/.torch")
+    add_model_dir(parser)
     parser.add_argument("-a", "--architecture", default="vgg11_bn",
-                        help="Anything  in torchvision.models. See "
+                        help="Anything in torchvision.models. See "
                              "https://pytorch.org/docs/stable/torchvision/models.html")
     args = parser.parse_args()
 

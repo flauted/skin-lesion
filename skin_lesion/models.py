@@ -1,5 +1,4 @@
-# The torchvision initializers suck because
-# they don't allow user to specify a path.
+# The torchvision initializers don't allow user to specify a path.
 # This is a hot fix
 
 import torchvision.models.vgg as vgg

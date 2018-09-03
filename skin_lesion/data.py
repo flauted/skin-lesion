@@ -2,7 +2,9 @@ import os
 
 import cv2
 import torch.utils.data
+import torchvision.transforms.functional as xF
 
+import matplotlib.pyplot as plt  # get rid of me!
 
 color_str2cvtr = {
     ("bgr", "rgb"): cv2.COLOR_BGR2RGB,
@@ -14,6 +16,15 @@ def resize(img, rows, columns):
     return cv2.resize(img, (columns, rows))
 
 
+def torch_xform(input_img, truth_img=None):
+    input_img = xF.to_tensor(input_img)
+    if truth_img is not None:
+        truth_img = (torch.from_numpy(truth_img) > 0).to(torch.int64)
+        return input_img, truth_img
+    else:
+        return input_img
+
+
 class SegDataset(torch.utils.data.Dataset):
     INPUT_IMG = "input_img"
     TRUTH_IMG = "truth_img"
@@ -23,7 +34,8 @@ class SegDataset(torch.utils.data.Dataset):
     def __init__(self, input_fldr, truth_fldr=None,
                  img_size=(256, 256),
                  colorspace="RGB",
-                 ignore_files={"LICENSE.txt", "ATTRIBUTION.txt"}):
+                 ignore_files={"LICENSE.txt", "ATTRIBUTION.txt"},
+                 xform=None):
         """Segmentation dataset.
 
         Assumes that the truth and input folders have same
@@ -50,6 +62,7 @@ class SegDataset(torch.utils.data.Dataset):
             assert len(self.input_files) == len(self.truth_files), (
                 f"Got {len(self.input_files)} input files and "
                 f"{len(self.truth_files)} truth files.")
+        self.xform = xform
 
     def __len__(self):
         return len(self.input_files)
@@ -65,8 +78,17 @@ class SegDataset(torch.utils.data.Dataset):
         if self.has_truth:
             truth_fname = self.truth_files[idx]
             truth_path = os.path.join(self.truth_fldr, truth_fname)
-            truth_img = resize(cv2.imread(truth_path), *self.img_size)
+            truth_img = resize(cv2.imread(truth_path, 0), *self.img_size)
+            _, truth_img = cv2.threshold(truth_img, 256 // 2, 255, cv2.THRESH_BINARY)
             sample.update({self.TRUTH_IMG: truth_img,
                            self.TRUTH_FNAME: truth_fname})
+
+            if self.xform:
+                sample[self.INPUT_IMG], sample[self.TRUTH_IMG] = \
+                    self.xform(sample[self.INPUT_IMG], sample[self.TRUTH_IMG])
+        else:
+            if self.xform:
+                sample[self.INPUT_IMG] = self.xform(sample[self.INPUT_IMG])
+
         return sample
 
