@@ -4,11 +4,11 @@ from default_paths import isic_default, task_12_training, task_1_training_gt, DE
 
 
 def add_input(parser):
-    parser.add_argument("--input", type=str, default=os.path.join(isic_default, task_12_training))
+    parser.add_argument("-i", "--input", type=str, default=os.path.join(isic_default, task_12_training))
 
 
 def add_truth(parser):
-    parser.add_argument("--truth", type=str, default=os.path.join(isic_default, task_1_training_gt))
+    parser.add_argument("-t", "--truth", type=str, default=os.path.join(isic_default, task_1_training_gt))
 
 
 def add_model_dir(parser):

@@ -67,18 +67,21 @@ class SegDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.input_files)
 
+    # @profile
     def __getitem__(self, idx):
         input_fname = self.input_files[idx]
         input_path = os.path.join(self.input_fldr, input_fname)
         # cv2 is BGR and we'll probably want HSV, La*b* or at least RGB
-        input_img = resize(cv2.imread(input_path), *self.img_size)
+        input_img = cv2.imread(input_path)
+        input_img = resize(input_img, *self.img_size)
         input_img = cv2.cvtColor(input_img, self.color_cvtr, self.color_cvtr)
         sample = {self.INPUT_IMG: input_img,
                   self.INPUT_FNAME: input_fname}
         if self.has_truth:
             truth_fname = self.truth_files[idx]
             truth_path = os.path.join(self.truth_fldr, truth_fname)
-            truth_img = resize(cv2.imread(truth_path, 0), *self.img_size)
+            truth_img = cv2.imread(truth_path, 0)
+            truth_img = resize(truth_img, *self.img_size)
             _, truth_img = cv2.threshold(truth_img, 256 // 2, 255, cv2.THRESH_BINARY)
             sample.update({self.TRUTH_IMG: truth_img,
                            self.TRUTH_FNAME: truth_fname})
