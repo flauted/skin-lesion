@@ -4,7 +4,7 @@ import cv2
 import torch.utils.data
 import torchvision.transforms.functional as xF
 
-import matplotlib.pyplot as plt  # get rid of me!
+from default_paths import DEFAULT_IGNORE_FILES
 
 color_str2cvtr = {
     ("bgr", "rgb"): cv2.COLOR_BGR2RGB,
@@ -34,7 +34,7 @@ class SegDataset(torch.utils.data.Dataset):
     def __init__(self, input_fldr, truth_fldr=None,
                  img_size=(256, 256),
                  colorspace="RGB",
-                 ignore_files={"LICENSE.txt", "ATTRIBUTION.txt"},
+                 ignore_files=DEFAULT_IGNORE_FILES,
                  xform=None):
         """Segmentation dataset.
 
@@ -67,7 +67,6 @@ class SegDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.input_files)
 
-    # @profile
     def __getitem__(self, idx):
         input_fname = self.input_files[idx]
         input_path = os.path.join(self.input_fldr, input_fname)

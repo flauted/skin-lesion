@@ -1,8 +1,10 @@
 import argparse
 import os
+import random
 import shutil
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 import matplotlib.pyplot as plt
 
@@ -15,11 +17,12 @@ CHW_TO_HWC = (1, 2, 0)
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 NUM_CLASSES = 2
 ROI_CHANNEL = 1
+NUM_SAMPLES = 4
 
 # these need to become flags
 TRAIN_WORKERS = 0
 VALID_WORKERS = 0
-EPOCHS = 1
+EPOCHS = 10
 BATCH_SIZE = 12
 OUTPUT_PATH = os.path.join("..", "output")
 try:
@@ -31,13 +34,60 @@ except:
     os.makedirs(OUTPUT_PATH)
 
 
-# @profile
+class Grid:
+    __slots__ = ["path", "fig", "axes", "n"]
+
+    def __init__(self, path, n_samples):
+        self.path = path
+        self.fig, self.axes = plt.subplots(n_samples, 4)
+        self.n = 0
+
+    def save(self):
+        self.fig.savefig(self.path)
+
+    def push(self, input, truth, output):
+        # after spending an hour trying to figure out why sample_binry was
+        # black, I've decided safety checks are worth the speed penalty.
+        assert input.dim() == 3
+        assert truth.dim() == 2
+        assert output.dim() == 3
+        assert output.shape[0] == NUM_CLASSES
+        (inp, tru, out, tsh) = self.axes[self.n]
+        sample_input = input.permute(*CHW_TO_HWC)
+        sample_truth = truth
+        sample_outpt = output[ROI_CHANNEL, ...]
+        sample_binry = (F.softmax(output, 0)[ROI_CHANNEL, ...] >= 0.5)
+
+        inp.imshow(sample_input)
+        tru.imshow(sample_truth, cmap="Greys_r")
+        out.imshow(sample_outpt, cmap="Greys_r")
+        tsh.imshow(sample_binry, cmap="Greys_r")
+
+        self.n += 1
+
+
+def save_sample(path, input, truth, output):
+    sample_input = input.permute(*CHW_TO_HWC).cpu().numpy()
+    sample_truth = truth.cpu().numpy()
+    sample_outpt = output[ROI_CHANNEL, ...].cpu().numpy()
+    sample_binry = F.softmax(output[ROI_CHANNEL, ...], 1) >= 0.5
+
+    fig, (inp, tru, out, tsh) = plt.subplots(1, 4)
+    inp.imshow(sample_input)
+    tru.imshow(sample_truth, cmap="Greys_r")
+    out.imshow(sample_outpt, cmap="Greys_r")
+    tsh.imshow(sample_binry, cmap="Greys_r")
+    fig.savefig(path)
+
+
 def validate(model, valid_loader, criterion, name):
     model.eval()
+    total_xent = 0
+    ct = 0
+    random_sample = set(random.sample(range(len(valid_loader.dataset)), NUM_SAMPLES))
+    grid = Grid(os.path.join(OUTPUT_PATH, name), NUM_SAMPLES)
     with torch.no_grad():
-        total_xent = 0
-        ct = 0
-        for sample in valid_loader:
+        for i, sample in enumerate(valid_loader):
             ct += 1
 
             input = sample[data.SegDataset.INPUT_IMG]
@@ -47,26 +97,22 @@ def validate(model, valid_loader, criterion, name):
             output = model(input)
 
             loss = criterion(output, truth)
-            total_xent += loss
+            total_xent += float(loss)
 
+            for x in range((i * BATCH_SIZE), (i+1) * BATCH_SIZE):
+                if x in random_sample:
+                    grid.push(input[x % BATCH_SIZE],
+                              truth[x % BATCH_SIZE],
+                              output[x % BATCH_SIZE])
+
+        grid.save()
         print("avg validation xent:", total_xent / ct)
 
-        sample_input = input[0, ...].permute(*CHW_TO_HWC).cpu().numpy()
-        sample_truth = truth[0, ...].cpu().numpy()
-        sample_outpt = output[0, ROI_CHANNEL, ...].detach().cpu().numpy()
 
-        fig, (inp, tru, out) = plt.subplots(1, 3)
-        inp.imshow(sample_input)
-        tru.imshow(sample_truth, cmap="Greys_r")
-        out.imshow(sample_outpt, cmap="Greys_r")
-        fig.savefig(os.path.join(OUTPUT_PATH, name))
-
-
-# @profile
 def main():
     parser = argparse.ArgumentParser()
-    add_input(parser)
-    add_truth(parser)
+    add_input(parser, cropped=True)
+    add_truth(parser, cropped=True)
     add_model_dir(parser)
     args = parser.parse_args()
 
