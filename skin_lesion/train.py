@@ -2,6 +2,7 @@ import argparse
 import os
 import random
 import shutil
+from tensorboardX import SummaryWriter
 
 import torch
 import torch.nn.functional as F
@@ -25,6 +26,7 @@ VALID_WORKERS = 0
 EPOCHS = 10
 BATCH_SIZE = 12
 OUTPUT_PATH = os.path.join("..", "output")
+LOGDIR = os.path.join("..", "tb")
 try:
     os.makedirs(OUTPUT_PATH)
 except:
@@ -32,6 +34,11 @@ except:
     input("> ")
     shutil.rmtree(OUTPUT_PATH)
     os.makedirs(OUTPUT_PATH)
+
+if os.path.exists(LOGDIR):
+    print(f"ok to remove {LOGDIR}? ENTER or CTRL-C")
+    input("> ")
+    shutil.rmtree(LOGDIR)
 
 
 class Grid:
@@ -44,6 +51,9 @@ class Grid:
 
     def save(self):
         self.fig.savefig(self.path)
+
+    def close(self):
+        plt.close(self.fig)
 
     def push(self, input, truth, output):
         # after spending an hour trying to figure out why sample_binry was
@@ -80,7 +90,7 @@ def save_sample(path, input, truth, output):
     fig.savefig(path)
 
 
-def validate(model, valid_loader, criterion, name):
+def validate(model, valid_loader, criterion, name, writer=None, step=None):
     model.eval()
     total_xent = 0
     ct = 0
@@ -105,7 +115,12 @@ def validate(model, valid_loader, criterion, name):
                               truth[x % BATCH_SIZE],
                               output[x % BATCH_SIZE])
 
+        if writer is not None:
+            assert step is not None
+            writer.add_scalar("data/valid_xent", total_xent / ct, step)
+
         grid.save()
+        grid.close()
         print("avg validation xent:", total_xent / ct)
 
 
@@ -137,6 +152,8 @@ def main():
 
     UPDATE_EVERY = 20
 
+    writer = SummaryWriter(log_dir=LOGDIR)
+
     for epoch in range(1, EPOCHS+1):
         for i, sample in enumerate(train_loader):
             input = sample[data.SegDataset.INPUT_IMG]
@@ -150,10 +167,17 @@ def main():
             optim.step()
 
             if i % UPDATE_EVERY == 0:
-                validate(model, valid_loader, criterion, f"{epoch:03d}_{i:03d}_eval.png")
+                validate(model,
+                         valid_loader,
+                         criterion,
+                         f"{epoch:03d}_{i:03d}_eval.png",
+                         writer=writer,
+                         step=(epoch - 1) * len(train_loader.dataset) + i * BATCH_SIZE)
                 model.train()
 
         print(f"finished epoch {epoch}")
+
+    writer.close()
 
 
 if __name__ == "__main__":

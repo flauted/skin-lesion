@@ -6,7 +6,7 @@ channels:
 dependencies:
   - defaults::"python>=3.6"
   - defaults::pip  # not strictly necessary - I always include for safety
-  - pytorch::pytorch=0.4.1
+  - pytorch::pytorch-cpu=0.4.1
   - pytorch::torchvision
   - defaults::matplotlib
   - conda-forge::opencv

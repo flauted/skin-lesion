@@ -16,6 +16,11 @@ Then install our conda environment with:
 ```bash
 conda env create -f requirements.yml -n isic2018
 ```
+if you have a GPU and with:
+```bash
+conda env create -f requirements_cpu.yml -n isic2018
+```
+if you do not have a GPU.
 
 To activate the environment, run:
 ```bash
@@ -42,6 +47,15 @@ For pretrained model paths, the default location is
 That is consistent with
 [``torch.utils.model_zoo``](https://pytorch.org/docs/stable/model_zoo.html?highlight=model_zoo#module-torch.utils.model_zoo)
 
+### Preprocessing
+Run ``resize_imgs.py`` to crop all images to a more reasonable size (maintaining aspect ratio).
+This drastically reduces the runtime. 
+
+### Visualization
+After starting a training session, navigate to the root directory of this repo and use
+``tensorboard --logdir LOGDIR`` where ``LOGDIR`` is the path to your tensorboard logs.
+By default, this is the ``tb`` folder.
+
 ## FAQ
 Q: I downloaded the data. How can I unzip it all conveniently? (with bash)?
 
@@ -60,3 +74,14 @@ Q: SegNet references?
 A: [clean implementation](https://github.com/zijundeng/pytorch-semantic-segmentation/blob/master/models/seg_net.py),
 [dirty (but explicit) implementation](https://github.com/delta-onera/delta_tb/blob/master/semantic_segmentation/model/segnet.py),
 and [the paper](https://arxiv.org/pdf/1511.00561.pdf)
+
+Q: Why do I need TensorFlow?
+
+A: Technically you just need TensorBoard but it depends on TensorFlow.
+We're using TensorboardX for training visualization and that requires TensorBoard. 
+You're welcome to try installing TensorBoard without TensorFlow and get it to work with TensorboardX.
+If you do, please let me know!
+
+Q: Do I need GPU TensorFlow?
+
+A: Nope. Tensorboard is all that matters, so any version of TensorFlow should work.
