@@ -1,13 +1,14 @@
 import argparse
+import math
 import os
 import random
 import shutil
-from tensorboardX import SummaryWriter
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
-import matplotlib.pyplot as plt
+from tensorboardX import SummaryWriter
 
 from args import add_input, add_truth, add_model_dir
 import data
@@ -21,9 +22,9 @@ ROI_CHANNEL = 1
 NUM_SAMPLES = 4
 
 # these need to become flags
-TRAIN_WORKERS = 0
-VALID_WORKERS = 0
-EPOCHS = 10
+TRAIN_WORKERS = 4
+VALID_WORKERS = 4
+EPOCHS = 25
 BATCH_SIZE = 12
 OUTPUT_PATH = os.path.join("..", "output")
 LOGDIR = os.path.join("..", "tb")
@@ -98,9 +99,8 @@ def validate(model, valid_loader, criterion, name, writer=None, step=None):
     grid = Grid(os.path.join(OUTPUT_PATH, name), NUM_SAMPLES)
     with torch.no_grad():
         for i, sample in enumerate(valid_loader):
-            ct += 1
-
             input = sample[data.SegDataset.INPUT_IMG]
+            ct += input.shape[0]
             truth = sample[data.SegDataset.TRUTH_IMG]
             input, truth = input.to(DEV), truth.to(DEV)
 
@@ -117,7 +117,7 @@ def validate(model, valid_loader, criterion, name, writer=None, step=None):
 
         if writer is not None:
             assert step is not None
-            writer.add_scalar("data/valid_xent", total_xent / ct, step)
+            writer.add_scalar("data/xentropy", total_xent / ct, step)
 
         grid.save()
         grid.close()
@@ -150,34 +150,46 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()
     optim = torch.optim.Adam(model.parameters())
 
-    UPDATE_EVERY = 20
+    UPDATE_EVERY = 100
 
-    writer = SummaryWriter(log_dir=LOGDIR)
+    valid_writer = SummaryWriter(log_dir=os.path.join(LOGDIR, "valid"))
+    train_writer = SummaryWriter(log_dir=os.path.join(LOGDIR, "train"))
 
+    batches_per_epoch = math.ceil(len(train_loader.dataset) / BATCH_SIZE)
     for epoch in range(1, EPOCHS+1):
+        total_xent = 0
+        ct = 0
+        steps_per_epochs_past = (epoch - 1) * len(train_loader.dataset)
+        updates_per_epochs_past = (epoch - 1) * batches_per_epoch
         for i, sample in enumerate(train_loader):
             input = sample[data.SegDataset.INPUT_IMG]
+            ct += input.size(0)
             truth = sample[data.SegDataset.TRUTH_IMG]
             input, truth = input.to(DEV), truth.to(DEV)
 
             output = model(input)
 
             loss = criterion(output, truth)
+            total_xent += loss.detach()
             loss.backward()
             optim.step()
 
-            if i % UPDATE_EVERY == 0:
+            if (updates_per_epochs_past + i) % UPDATE_EVERY == 0:
+                step = steps_per_epochs_past + ct
                 validate(model,
                          valid_loader,
                          criterion,
-                         f"{epoch:03d}_{i:03d}_eval.png",
-                         writer=writer,
-                         step=(epoch - 1) * len(train_loader.dataset) + i * BATCH_SIZE)
+                         f"s{step}_e{epoch:03d}_u{i:03d}.png",
+                         writer=valid_writer,
+                         step=step)
                 model.train()
 
         print(f"finished epoch {epoch}")
+        step = steps_per_epochs_past + ct
+        train_writer.add_scalar("data/xentropy", float(total_xent) / ct, step)
 
-    writer.close()
+    train_writer.close()
+    valid_writer.close()
 
 
 if __name__ == "__main__":
