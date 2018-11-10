@@ -3,9 +3,8 @@ import os
 
 import matplotlib.pyplot as plt
 
-from args import add_input, add_truth
+from args import add_valid, add_masks, add_training
 from data import SegDataset
-from default_paths import isic_default, task_12_training, task_1_training_gt
 
 
 def visualize(dset):
@@ -27,8 +26,14 @@ def visualize(dset):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    add_input(parser)
-    add_truth(parser)
+    parser.add_argument("-tr", "--use_train", action="store_true", default=True)
+    add_valid(parser)
+    add_masks(parser)
+    add_training(parser)
     args = parser.parse_args()
-    dset = SegDataset(args.input, args.truth)
+    if not args.use_train:
+        dset = SegDataset(args.valid, args.truth)
+    else:
+        dset = SegDataset(args.input, args.truth)
+    dset.eval()
     visualize(dset)
