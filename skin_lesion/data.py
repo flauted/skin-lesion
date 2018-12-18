@@ -1,3 +1,4 @@
+import itertools
 import random
 import os
 from math import floor, ceil
@@ -77,6 +78,7 @@ class SegDataset(torch.utils.data.Dataset):
                  random_lr=False,
                  random_ud=False,
                  random_45=True,
+                 random_90=True,
                  noised_bbox=True):
         """Segmentation dataset.
 
@@ -98,13 +100,26 @@ class SegDataset(torch.utils.data.Dataset):
         self.input_fldr = input_fldr
         self.input_files = sorted(
             (f for f in os.listdir(self.input_fldr) if f not in ignore_files))
+        self.input_files_folded = []
+        for file in self.input_files:
+            # it matters that input_files is sorted here!
+            if "_90." not in file and "_180." not in file and "_270." not in file:
+                self.input_files_folded.append([file])
+                cur_base = file
+            else:
+                assert cur_base.split(".")[0] in file
+                self.input_files_folded[-1].append(file)
+
         self.img_size = img_size
         if self.has_truth:
             self.truth_fldr = truth_fldr
-            self.truth_files = [
-                os.path.splitext(f)[0] + "_segmentation.png"
-                for f in self.input_files
-            ]
+            self.truth_files_folded = []
+            for files in self.input_files_folded:
+                self.truth_files_folded.append(
+                    [os.path.splitext(f)[0] + "_segmentation.png"
+                     for f in files]
+                )
+            self.truth_files = itertools.chain.from_iterable(self.truth_files_folded)
 
         self.has_bboxes = False
         if bbox_file is not None:
@@ -131,6 +146,7 @@ class SegDataset(torch.utils.data.Dataset):
         self.random_lr = random_lr
         self.random_ud = random_ud
         self.random_45 = random_45
+        self.random_90 = random_90
         self.noised_bbox = noised_bbox
         if bbox_file is None and self.noised_bbox:
             print("[Warning] No bounding boxes but noised_bbox requires them.")
@@ -240,16 +256,50 @@ class SegDataset(torch.utils.data.Dataset):
                     best_bbox['c0']:best_bbox['cf']]
         return input_img
 
+    @staticmethod
+    def manual_rot_bbox(bbox, cols, rows, rot_choice):
+        if rot_choice == 0:
+            return
+        else:
+            r0, rf, c0, cf = bbox['r0'], bbox['rf'], bbox['c0'], bbox['cf']
+            if rot_choice == 1:
+                r0n, rfn, c0n, cfn = cols - cf, cols - c0, r0, rf
+            elif rot_choice == 2:
+                r0n, rfn, c0n, cfn = rows - rf, rows - r0, cols - cf, cols - c0
+            elif rot_choice == 3:
+                r0n, rfn, c0n, cfn = c0, cf, rows - rf, rows - r0
+            bbox['r0'], bbox['rf'], bbox['c0'], bbox['cf'] = r0n, rfn, c0n, cfn
+
     def __len__(self):
-        return len(self.input_files)
+        return len(self.input_files_folded)
 
     def get_mole(self, idx):
-        input_fname = self.input_files[idx]
+        input_files = self.input_files_folded[idx]
+        assert len(input_files) == 1 or len(input_files) == 4
+        manual_rot = False
+        if self._train and self.random_90:
+            rot_choice = random.randint(0, 3)
+            if len(input_files) != 4:
+                manual_rot = True
+                load_choice = 0
+            else:
+                load_choice = rot_choice
+        else:
+            load_choice = 0
+
+        input_fname = input_files[load_choice]
+
         input_path = os.path.join(self.input_fldr, input_fname)
         # cv2 is BGR and we'll probably want HSV, La*b* or at least RGB
         raw_img = cv2.imread(input_path)
+
         if raw_img is None:
             raise FileNotFoundError(input_path)
+
+        rows_0, cols_0 = raw_img.shape[:2]
+
+        if manual_rot and rot_choice != 0:
+            raw_img = np.rot90(raw_img, k=rot_choice)
 
         raw_img = self.maybe_jitter(raw_img)
 
@@ -263,6 +313,8 @@ class SegDataset(torch.utils.data.Dataset):
 
         if self.has_bboxes:
             best_bbox = self.retrieve_bbox(input_fname)
+            if manual_rot:
+                self.manual_rot_bbox(best_bbox, cols_0, rows_0, rot_choice)
             if self._train and self.noised_bbox:
                 grace = (0.1 * random.uniform(0, 2), 0.1 * random.uniform(0, 2))
             else:
@@ -271,6 +323,7 @@ class SegDataset(torch.utils.data.Dataset):
             self.add_percent(best_bbox, orig_img.shape[:2], percent=grace)
             ufm_bbox = self.calc_ufm_bbox(best_bbox, ratios)
             cropped_img = self.crop(orig_img, best_bbox)
+
         else:
             # None or False would make more sense, but this 'hacks' the default batching fn
             # and bool({}) is False.
@@ -292,9 +345,12 @@ class SegDataset(torch.utils.data.Dataset):
                   self.INPUT_FNAME: input_fname}
 
         if self.has_truth:
-            truth_fname = self.truth_files[idx]
+            truth_fname = self.truth_files_folded[idx][load_choice]
             truth_path = os.path.join(self.truth_fldr, truth_fname)
             orig_gt = cv2.imread(truth_path, 0)
+            if manual_rot and rot_choice != 0:
+                orig_gt = np.rot90(orig_gt, k=rot_choice)
+
             if orig_gt is None:
                 raise FileNotFoundError(truth_path)
 

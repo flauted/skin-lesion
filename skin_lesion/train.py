@@ -19,21 +19,6 @@ import skin_lesion.kfold as kfold
 CHW_TO_HWC = (1, 2, 0)
 
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-NUM_SAMPLES = 4
-
-KFOLD = 10
-
-# these need to become flags
-TRAIN_WORKERS = 4
-VALID_WORKERS = 4
-EPOCHS = 400
-BATCH_SIZE = 1
-EFFV_BATCH_SIZE = 2
-assert EFFV_BATCH_SIZE // BATCH_SIZE == EFFV_BATCH_SIZE / BATCH_SIZE
-RANDOM_LR = True
-RANDOM_UD = True
-OUTPUT_PATH = os.path.join("..", "output")
-LOGDIR = os.path.join("..", "tb")
 
 
 class Grid:
@@ -129,14 +114,18 @@ def set_loader_dset(loader, train=False):
     return loader
 
 
-def validate(model, valid_loader, criterion, name, writer=None, step=None):
+def validate(model, valid_loader, criterion, name, writer=None, step=None,
+             output_path=None, num_samples=None, batch_size=0, kfold=False):
     model.eval()
     total_xent = 0
     total_acc = 0
     total_iou = 0
     ct = 0
-    random_sample = set(random.sample(range(len(valid_loader.dataset)), NUM_SAMPLES))
-    grid = Grid(os.path.join(OUTPUT_PATH, name), NUM_SAMPLES)
+    if not kfold:
+        random_sample = set(random.sample(range(len(valid_loader.dataset)), num_samples))
+    else:
+        random_sample = set(random.sample(range(len(valid_loader.sampler.val_fold())), num_samples))
+    grid = Grid(os.path.join(output_path, name), num_samples)
 
     valid_loader = set_loader_dset(valid_loader, train=False)
 
@@ -181,9 +170,10 @@ def validate(model, valid_loader, criterion, name, writer=None, step=None):
             output = torch.sigmoid(output)
             output_uncropped = torch.sigmoid(output_uncropped)
 
-            for x in range((i * BATCH_SIZE), (i+1) * BATCH_SIZE):
+            for x in range((i * batch_size), (i+1) * batch_size):
                 if x in random_sample:
-                    x_mod_bs = x % BATCH_SIZE
+                    random_sample.remove(x)
+                    x_mod_bs = x % batch_size
                     grid.push(
                         input_orig[x_mod_bs, 0:3],
                         input[x_mod_bs, 0:3],
@@ -192,6 +182,7 @@ def validate(model, valid_loader, criterion, name, writer=None, step=None):
                         output_bin[x_mod_bs],
                         truth[x_mod_bs],
                         truth_orig[x_mod_bs])
+        assert len(random_sample) == 0
 
         if writer is not None:
             assert step is not None
@@ -219,29 +210,19 @@ def dice_loss_w_logits(input, target):
                 (iflat.sum() + tflat.sum() + smooth))
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    add_training(parser)
-    add_masks(parser)
-    add_valid(parser)
-    add_model_dir(parser)
-    add_bbox(parser)
-    add_vbbox(parser)
-
-    parser.add_argument("-c", "--criterion", choices=["xent", "dice"],
-                        type=str, default="dice",
-                        help="Loss function.")
-    args = parser.parse_args()
+def main(args):
+    random_ud = not args.no_flip
+    random_lr = not args.no_flip
 
     dset = data.SegDataset(
         args.input,
         args.truth,
         bbox_file=args.bbox_file,
         xform=data.SegDataset.torch_xform,
-        random_ud=RANDOM_UD,
-        random_lr=RANDOM_LR)
+        random_ud=random_ud,
+        random_lr=random_lr)
 
-    if KFOLD == 0:
+    if args.k_folds == 0:
         if args.valid is None:
             print("Creating random split validation set.")
             train_size = int(round(len(dset) * 0.8))
@@ -254,8 +235,8 @@ def main():
                 args.truth,
                 bbox_file=args.vbbox_file,
                 xform=data.SegDataset.torch_xform,
-                random_ud=RANDOM_UD,
-                random_lr=RANDOM_LR)
+                random_ud=random_ud,
+                random_lr=random_lr)
         print(f"Training with {len(dset_train)} samples")
         print(f"Validating with {len(dset_valid)} samples")
 
@@ -270,34 +251,39 @@ def main():
                 args.truth,
                 bbox_file=args.vbbox_file,
                 xform=data.SegDataset.torch_xform,
-                random_ud=RANDOM_UD,
-                random_lr=RANDOM_LR)
+                random_ud=random_ud,
+                random_lr=random_lr)
             full_dset = torch.utils.data.ConcatDataset([dset, dset_valid])
-        print(f"Training & k-fold x-valing with {len(full_dset)} samples and {KFOLD} folds")
+        print(f"Training & k-fold x-valing with {len(full_dset)} samples and {args.k_folds} folds")
 
+    if args.arch == "SegLab":
+        model = SegLab(1, in_channels=7, pretrained=True, model_dir=args.model_dir)
+    elif args.arch == "SegNet":
+        model = SegNet(1, in_channels=7, pretrained=True, model_dir=args.model_dir)
+    else:
+        raise NotImplementedError(f"Architecture {args.arch} is not implemented.")
 
-    model = SegLab(1, in_channels=7, pretrained=True, model_dir=args.model_dir)
     print(model)
     model = model.to(DEV)
     if DEV.type == "cuda":
         print("Using GPU")
     model.train()
 
-    if KFOLD == 0:
+    if args.k_folds == 0:
         train_loader = DataLoader(
-            dset_train, batch_size=BATCH_SIZE, num_workers=TRAIN_WORKERS,
+            dset_train, batch_size=args.batch_size, num_workers=args.workers[0],
             shuffle=True, pin_memory=False)
         valid_loader = DataLoader(
-            dset_valid, batch_size=BATCH_SIZE, num_workers=VALID_WORKERS,
+            dset_valid, batch_size=args.batch_size, num_workers=args.workers[1],
             pin_memory=False)
     else:
-        sampler = kfold.KfoldSampler(len(full_dset), KFOLD)
+        sampler = kfold.KfoldSampler(len(full_dset), args.k_folds)
         sampler.train = True
         train_loader = DataLoader(
-            full_dset, batch_size=BATCH_SIZE, num_workers=TRAIN_WORKERS,
+            full_dset, batch_size=args.batch_size, num_workers=args.workers[0],
             sampler=sampler, pin_memory=False)
         valid_loader = DataLoader(
-            full_dset, batch_size=BATCH_SIZE, num_workers=VALID_WORKERS,
+            full_dset, batch_size=args.batch_size, num_workers=args.workers[1],
             sampler=sampler, pin_memory=False)
 
     if args.criterion == "xent":
@@ -311,15 +297,15 @@ def main():
 
     UPDATE_EVERY = 1000
 
-    valid_writer = SummaryWriter(log_dir=os.path.join(LOGDIR, "valid"))
-    train_writer = SummaryWriter(log_dir=os.path.join(LOGDIR, "train"))
+    valid_writer = SummaryWriter(log_dir=os.path.join(args.logdir, "valid"))
+    train_writer = SummaryWriter(log_dir=os.path.join(args.logdir, "train"))
 
-    batches_per_epoch = math.ceil(len(train_loader.dataset) / BATCH_SIZE)
-    effv_batches_per_epoch = math.ceil(len(train_loader.dataset) / EFFV_BATCH_SIZE)
+    # batches_per_epoch = math.ceil(len(train_loader.dataset) / args.batch_size)
+    effv_batches_per_epoch = math.ceil(len(train_loader.dataset) / args.effv_batch_size)
     INPUT_IMG_KEY = data.SegDataset.IN_CROPPED_IMG if dset.has_bboxes else data.SegDataset.IN_ORIG_IMG
     TRUTH_IMG_KEY = data.SegDataset.GT_CROPPED_IMG if dset.has_bboxes else data.SegDataset.GT_ORIG_IMG
 
-    for epoch in range(1, EPOCHS+1):
+    for epoch in range(1, args.epochs+1):
         sched.step()
         print("Current learning rate:", sched.get_lr())
         total_loss = 0
@@ -345,7 +331,7 @@ def main():
             sum_loss += loss
             total_loss += loss.detach()
 
-            if effv_ct == EFFV_BATCH_SIZE:
+            if effv_ct == args.effv_batch_size:
                 avg_loss = sum_loss / effv_ct
                 avg_loss.backward()
                 optim.step()
@@ -355,20 +341,24 @@ def main():
 
             if (updates_per_epochs_past + i) % UPDATE_EVERY == 0:
                 samples = samples_per_epochs_past + ct
-                if KFOLD != 0:
+                if args.k_folds != 0:
                     sampler.train = False
                 validate(model,
                          valid_loader,
                          criterion,
                          f"s{samples}_e{epoch:03d}_u{i:03d}.png",
                          writer=valid_writer,
-                         step=samples)
+                         step=samples,
+                         output_path=args.output_path,
+                         num_samples=args.num_samples,
+                         batch_size=args.batch_size,
+                         kfold=args.k_folds != 0)
                 model.train()
-                if KFOLD != 0:
-                    sampler.train= True
+                if args.k_folds != 0:
+                    sampler.train = True
                 train_loader = set_loader_dset(train_loader, train=True)
 
-        if KFOLD != 0:
+        if args.k_folds != 0:
             sampler.next_fold()
             print(f"Validation fold set to {sampler.i}")
 
@@ -387,18 +377,59 @@ def main():
     valid_writer.close()
 
 
-if __name__ == "__main__":
+def setup(args):
     try:
-        os.makedirs(OUTPUT_PATH)
+        os.makedirs(args.output_path)
     except:
-        print(f"ok to remove {OUTPUT_PATH}? ENTER or CTRL-C")
+        print(f"ok to remove {args.output_path}? ENTER or CTRL-C")
         input("> ")
-        shutil.rmtree(OUTPUT_PATH)
-        os.makedirs(OUTPUT_PATH)
+        shutil.rmtree(args.output_path)
+        os.makedirs(args.output_path)
 
-    if os.path.exists(LOGDIR):
-        print(f"ok to remove {LOGDIR}? ENTER or CTRL-C")
+    if os.path.exists(args.logdir):
+        print(f"ok to remove {args.logdir}? ENTER or CTRL-C")
         input("> ")
-        shutil.rmtree(LOGDIR)
+        shutil.rmtree(args.logdir)
 
-    main()
+
+def add_args(parser):
+    """Add script args to the parser.
+
+    Args:
+        parser (argparse.ArgumentParser): Parser.
+
+    """
+    parser.add_argument("-ns", "--num-samples", type=int, default=4,
+                        help="Number of samples per validation image.")
+    parser.add_argument("-k", "--k-folds", type=int, default=10,
+                        help="Number of cross-validation folds. 0 for no xval ('regular eval').")
+    parser.add_argument("-w", "--workers", nargs=2, type=int, default=[4, 1], metavar=("TRAIN", "VALID"),
+                        help="Number of train/valid workers for data loading.")
+    parser.add_argument("-e", "--epochs", type=int, default=400,
+                        help="Number of training cycles.")
+    parser.add_argument("-bs", "--batch-size", type=int, default=2)
+    parser.add_argument("-ebs", "--effv-batch-size", type=int, default=4)
+    parser.add_argument("-nf", "--no-flip", action="store_true", default=False,
+                        help="No random left-right or up-down flips.")
+    parser.add_argument("-o", "--output-path", default=os.path.join("..", "output"))
+    parser.add_argument("-tb", "--logdir", default=os.path.join("..", "tb"))
+    parser.add_argument("-a", "--arch", default="SegLab", type=str, choices=["SegLab", "SegNet"],
+                        help="Model architecture.")
+    parser.add_argument("-c", "--criterion", choices=["xent", "dice"],
+                        type=str, default="dice",
+                        help="Loss function.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    add_args(parser)
+    add_training(parser)
+    add_masks(parser)
+    add_valid(parser)
+    add_model_dir(parser)
+    add_bbox(parser)
+    add_vbbox(parser)
+
+    args = parser.parse_args()
+    setup(args)
+    main(args)
